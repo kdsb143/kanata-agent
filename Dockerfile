@@ -91,7 +91,7 @@ RUN cd web && npm run build && \
 # Deps are already installed in the cached layer above; `--no-deps` makes
 # this a fast (~1s) egg-link creation with no resolution or downloads.
 RUN uv pip install --no-cache-dir --no-deps -e "."
-RUN uv pip install --no-cache-dir hermes-extension-whatsapp
+RUN uv pip install --no-cache-dir "hermes[messaging]"
 
 # ---------- Permissions ----------
 # Make install dir world-readable so any HERMES_UID can read it at runtime.
