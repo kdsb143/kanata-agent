@@ -92,6 +92,7 @@ RUN cd web && npm run build && \
 # this a fast (~1s) egg-link creation with no resolution or downloads.
 RUN uv pip install --no-cache-dir --no-deps -e "."
 RUN uv pip install --no-cache-dir "hermes[messaging]"
+RUN cd /opt/hermes && uv run hermes extension install whatsapp
 
 # ---------- Permissions ----------
 # Make install dir world-readable so any HERMES_UID can read it at runtime.
