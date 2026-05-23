@@ -48,7 +48,6 @@ COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 # check on every startup and triggers a runtime `npm install` that then
 # fails with EACCES (node_modules/ is root-owned from build time).
 ENV npm_config_install_links=false
-
 RUN npm install --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
     (cd web && npm install --prefer-offline --no-audit) && \
@@ -79,11 +78,9 @@ RUN npm install --prefer-offline --no-audit && \
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
 RUN uv sync --frozen --no-install-project --extra all --extra messaging
-
 # ---------- Source code ----------
 # .dockerignore excludes node_modules, so the installs above survive.
 COPY --chown=hermes:hermes . .
-
 # Build browser dashboard and terminal UI assets.
 RUN cd web && npm run build && \
     cd ../ui-tui && npm run build
@@ -91,13 +88,7 @@ RUN cd web && npm run build && \
 # Deps are already installed in the cached layer above; `--no-deps` makes
 # this a fast (~1s) egg-link creation with no resolution or downloads.
 RUN uv pip install --no-cache-dir --no-deps -e "."
-# Pre-install node/npm production environments
-RUN apt-get update && apt-get install -y nodejs npm
-RUN npm install -g pnpm
 
-# Install Hermes and pre-build the WhatsApp extension 
-RUN uv pip install --no-cache-dir "hermes[messaging]"
-RUN cd /opt/hermes && uv run hermes extension install whatsapp --force
 # ---------- Permissions ----------
 # Make install dir world-readable so any HERMES_UID can read it at runtime.
 # The venv needs to be traversable too.
@@ -116,8 +107,8 @@ RUN chmod -R a+rX /opt/hermes && \
 # Start as root so the entrypoint can usermod/groupmod + gosu.
 # If HERMES_UID is unset, the entrypoint drops to the default hermes user (10000).
 
-
 # ---------- Runtime ----------
+ENV HERMES_CONTAINER=1
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 ENV HERMES_HOME=/opt/data
 ENV PATH="/opt/data/.local/bin:${PATH}"
