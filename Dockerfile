@@ -1,13 +1,11 @@
 # ==========================================
-# Stage 1: Build the Frontend Assets (Node.js)
+# Stage 1: Build Frontend & Download Playwright
 # ==========================================
 FROM node:20-slim AS frontend-builder
 WORKDIR /opt/hermes
 
-# Install minimal git utilities needed for specific package setups
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
-# Copy only what is necessary for the frontend build engine
 COPY package.json package-lock.json ./
 COPY web/package.json web/package-lock.json web/
 COPY ui-tui/package.json ui-tui/package-lock.json ui-tui/
@@ -15,14 +13,16 @@ COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 
 ENV npm_config_install_links=false
 
-# Install node modules and immediately compile the static build bundles
 RUN npm install --prefer-offline --no-audit && \
     (cd web && npm install --prefer-offline --no-audit) && \
     (cd ui-tui && npm install --prefer-offline --no-audit)
 
-# Copy source trees needed for compiling dashboard and terminal UI assets
 COPY web ./web
 COPY ui-tui ./ui-tui
+
+# Tell Playwright where to download the browsers inside Stage 1
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
+RUN npx playwright install --with-deps chromium --only-shell
 
 RUN cd web && npm run build && \
     cd ../ui-tui && npm run build && \
@@ -37,7 +37,6 @@ WORKDIR /opt/hermes
 
 COPY --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 
-# Install compiling utilities strictly inside this temporary build layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc python3-dev libffi-dev git && \
     rm -rf /var/lib/apt/lists/*
@@ -45,7 +44,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
-# Sync core dependencies using lockfile manifest tracking
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
 RUN uv sync --frozen --no-install-project --extra all --extra messaging
@@ -57,7 +55,6 @@ FROM tianon/gosu:1.19-trixie@sha256:3b176695959c71e123eb390d427efc665eeb561b1540
 FROM python:3.11-slim AS runtime
 WORKDIR /opt/hermes
 
-# Strict low-memory allocation adjustments
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     MALLOC_ARENA_MAX=2 \
@@ -68,39 +65,32 @@ ENV PYTHONUNBUFFERED=1 \
     HERMES_HOME=/opt/data \
     PATH="/opt/data/.local/bin:/opt/hermes/.venv/bin:${PATH}"
 
-# Install only light runtime binaries needed for task execution
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ripgrep ffmpeg procps git openssh-client docker-cli tini && \
     rm -rf /var/lib/apt/lists/*
 
-# Set up non-root execution parameters safely
 RUN useradd -u 10000 -m -d /opt/data hermes
 COPY --chmod=0755 --from=gosu_source /gosu /usr/local/bin/
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 
-# Pull compiled virtual environment layer from Stage 2
+# Pull compiled virtual environment
 COPY --from=python-builder /opt/hermes/.venv /opt/hermes/.venv
 
-# Pull static web / TUI distribution bundles from Stage 1
+# Pull static web, modules, AND the downloaded Playwright browsers from Stage 1
 COPY --from=frontend-builder /opt/hermes/web /opt/hermes/web
 COPY --from=frontend-builder /opt/hermes/ui-tui /opt/hermes/ui-tui
 COPY --from=frontend-builder /opt/hermes/node_modules /opt/hermes/node_modules
+COPY --from=frontend-builder /opt/hermes/.playwright /opt/hermes/.playwright
 
-# Bring in remainder of runtime tracking scripts/configurations
 COPY . .
 
-# Link hermes-agent instantly without processing dependency layers down
+# Fast editable link setup
 RUN uv pip install --no-cache-dir --no-deps -e "."
 
-# Install minimal playwright runtime elements 
-RUN npx playwright install --with-deps chromium --only-shell && \
-    npm cache clean --force
-
-# Establish directory adjustments safely for the runtime uid
 USER root
 RUN mkdir -p /opt/data && \
     chmod -R a+rX /opt/hermes && \
-    chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/ui-tui /opt/hermes/node_modules /opt/data
+    chown -R hermes:hermes /opt/hermes/.venv /opt/hermes/ui-tui /opt/hermes/node_modules /opt/hermes/.playwright /opt/data
 
 VOLUME [ "/opt/data" ]
 ENTRYPOINT [ "/usr/bin/tini", "-g", "--", "/opt/hermes/docker/entrypoint.sh" ]
